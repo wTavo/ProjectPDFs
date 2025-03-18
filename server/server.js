@@ -6,67 +6,14 @@ const path = require('path');
 const cors = require('cors');
 const { extractParagraphsFromText } = require('./extractParagraphs');
 const pdfParse = require('pdf-parse');
-const OpenAI = require('openai');
 
 const app = express();
 app.use(cors());
 app.use(fileUpload());
 app.use(express.json({ limit: '50mb' }));
 
-// Configuración de la API de OpenAI para DeepSeek
-const openai = new OpenAI({
-  apiKey: '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',
-  baseURL: 'https://integrate.api.nvidia.com/v1',
-});
-
 // Almacenamiento en memoria para los datos (en producción usarías una base de datos)
 const pdfData = {};
-
-// Función modificada para extraer palabras clave usando DeepSeek R1
-async function extractKeywords(text) {
-  try {
-    const completion = await openai.chat.completions.create({
-      model: "deepseek-ai/deepseek-r1",
-      messages: [
-        {
-          "role": "system", 
-          "content": "Analiza el siguiente texto y proporciona 5-7 palabras o frases clave más importantes. Piensa en detalle sobre el contenido y su significado. Escribe todo tu análisis con libertad, pero asegúrate de poner SOLO las palabras clave entre asteriscos, por ejemplo: *palabra clave*. Las palabras clave deben estar separadas, cada una con sus propios asteriscos."
-        },
-        {
-          "role": "user", 
-          "content": text
-        }
-      ],
-      temperature: 0.3,
-      max_tokens: 1024
-    });
-
-    const response = completion.choices[0].message.content.trim();
-    
-    // Extraer solo las palabras clave entre asteriscos
-    const keywordsArray = [];
-    const matches = response.match(/\*(.*?)\*/g);
-    
-    if (matches) {
-      const extractedKeywords = matches.map(match => match.replace(/\*/g, '').trim());
-      return {
-        fullResponse: response,
-        keywords: extractedKeywords
-      };
-    }
-    
-    return {
-      fullResponse: response,
-      keywords: []
-    };
-  } catch (error) {
-    console.error('Error al extraer palabras clave:', error);
-    return {
-      fullResponse: 'Error al analizar el texto',
-      keywords: []
-    };
-  }
-}
 
 // Ruta para procesar el PDF y obtener su texto
 app.post('/process-pdf', async (req, res) => {
@@ -158,19 +105,6 @@ app.post('/extract-from-edited', async (req, res) => {
     const editedText = pdfData[pdfId].editedText;
     const extractedParagraphs = extractParagraphsFromText(editedText, paragraphNumbersArray);
     
-    // Analizar cada párrafo con IA y obtener tanto el análisis completo como las palabras clave
-    const paragraphsWithAnalysis = [];
-    
-    for (const paragraph of extractedParagraphs) {
-      const analysis = await extractKeywords(paragraph.text);
-      paragraphsWithAnalysis.push({
-        ...paragraph,
-        aiAnalysis: analysis.fullResponse,
-        keywords: analysis.keywords
-      });
-    }
-    
-    res.json({ extractedParagraphs: paragraphsWithAnalysis });
   } catch (error) {
     console.error('Error extracting paragraphs:', error);
     res.status(500).send('Error extracting paragraphs');

@@ -288,27 +288,6 @@ function App() {
                         </div>
                       </div>
                     )}
-                    {paragraph.aiAnalysis && (
-                      <div className="ai-analysis-section">
-                        <button 
-                          className="toggle-analysis-btn"
-                          onClick={() => {
-                            // Usar estado local para controlar la visibilidad
-                            const updatedParagraphs = [...extractedParagraphs];
-                            updatedParagraphs[index].showAnalysis = !updatedParagraphs[index].showAnalysis;
-                            setExtractedParagraphs(updatedParagraphs);
-                          }}
-                        >
-                          {paragraph.showAnalysis ? 'Ocultar análisis completo' : 'Mostrar análisis completo'}
-                        </button>
-                        
-                        {paragraph.showAnalysis && (
-                          <div className="ai-analysis-content">
-                            <div dangerouslySetInnerHTML={{ __html: paragraph.aiAnalysis.replace(/\*(.*?)\*/g, '<span class="highlighted">$1</span>') }} />
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </div>
               ))}
