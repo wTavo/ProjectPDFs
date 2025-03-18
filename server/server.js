@@ -4,22 +4,143 @@ const fileUpload = require('express-fileupload');
 const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
-const { extractParagraphsFromPDF } = require('./extractParagraphs');
+const { extractParagraphsFromText } = require('./extractParagraphs');
 const pdfParse = require('pdf-parse');
+const OpenAI = require('openai');
 
 const app = express();
 app.use(cors());
 app.use(fileUpload());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
-// Ruta para extraer párrafos específicos
-app.post('/extract-paragraphs', async (req, res) => {
+// Configuración de la API de OpenAI para DeepSeek
+const openai = new OpenAI({
+  apiKey: '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',
+  baseURL: 'https://integrate.api.nvidia.com/v1',
+});
+
+// Almacenamiento en memoria para los datos (en producción usarías una base de datos)
+const pdfData = {};
+
+// Función modificada para extraer palabras clave usando DeepSeek R1
+async function extractKeywords(text) {
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "deepseek-ai/deepseek-r1",
+      messages: [
+        {
+          "role": "system", 
+          "content": "Analiza el siguiente texto y proporciona 5-7 palabras o frases clave más importantes. Piensa en detalle sobre el contenido y su significado. Escribe todo tu análisis con libertad, pero asegúrate de poner SOLO las palabras clave entre asteriscos, por ejemplo: *palabra clave*. Las palabras clave deben estar separadas, cada una con sus propios asteriscos."
+        },
+        {
+          "role": "user", 
+          "content": text
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 1024
+    });
+
+    const response = completion.choices[0].message.content.trim();
+    
+    // Extraer solo las palabras clave entre asteriscos
+    const keywordsArray = [];
+    const matches = response.match(/\*(.*?)\*/g);
+    
+    if (matches) {
+      const extractedKeywords = matches.map(match => match.replace(/\*/g, '').trim());
+      return {
+        fullResponse: response,
+        keywords: extractedKeywords
+      };
+    }
+    
+    return {
+      fullResponse: response,
+      keywords: []
+    };
+  } catch (error) {
+    console.error('Error al extraer palabras clave:', error);
+    return {
+      fullResponse: 'Error al analizar el texto',
+      keywords: []
+    };
+  }
+}
+
+// Ruta para procesar el PDF y obtener su texto
+app.post('/process-pdf', async (req, res) => {
   if (!req.files || !req.files.pdf) {
     return res.status(400).send('No PDF file uploaded.');
   }
 
   const { pdf } = req.files;
-  const { paragraphNumbers } = req.body;
+
+  try {
+    // Guarda el archivo temporalmente
+    const tempFilePath = path.join(__dirname, 'temp.pdf');
+    await pdf.mv(tempFilePath);
+
+    // Genera un ID único para el PDF
+    const pdfId = pdf.name + '_' + Date.now();
+
+    // Extrae el texto crudo usando pdf-parse
+    const dataBuffer = fs.readFileSync(tempFilePath);
+    const data = await pdfParse(dataBuffer);
+    const rawText = data.text; // Texto crudo extraído
+
+    // Almacena los datos del PDF
+    pdfData[pdfId] = {
+      originalText: rawText,
+      editedText: rawText, // Inicialmente igual al texto original
+      fileName: pdf.name
+    };
+
+    // Elimina el archivo temporal
+    fs.unlinkSync(tempFilePath);
+
+    // Devuelve el texto crudo y el ID del PDF
+    res.json({ 
+      rawText,
+      pdfId
+    });
+  } catch (error) {
+    console.error('Error processing PDF:', error);
+    res.status(500).send('Error processing PDF.');
+  }
+});
+
+// Ruta para guardar el texto editado
+app.post('/save-edited-text', (req, res) => {
+  const { pdfId, editedText } = req.body;
+  
+  if (!pdfId || editedText === undefined) {
+    return res.status(400).send('Missing required fields');
+  }
+
+  // Verifica si existe este PDF
+  if (!pdfData[pdfId]) {
+    return res.status(404).send('PDF not found');
+  }
+
+  // Guarda el texto editado
+  pdfData[pdfId].editedText = editedText;
+  
+  res.json({ success: true, message: 'Text edited successfully' });
+});
+
+// Ruta para extraer párrafos del texto editado con análisis completo
+app.post('/extract-from-edited', async (req, res) => {
+  const { pdfId, paragraphNumbers } = req.body;
+  
+  if (!pdfId || !paragraphNumbers) {
+    return res.status(400).send('Missing required fields');
+  }
+
+  // Verifica si existe este PDF
+  if (!pdfData[pdfId]) {
+    return res.status(404).send('PDF not found');
+  }
 
   // Parsea paragraphNumbers desde JSON
   let paragraphNumbersArray;
@@ -33,26 +154,26 @@ app.post('/extract-paragraphs', async (req, res) => {
   }
 
   try {
-    // Guarda el archivo temporalmente
-    const tempFilePath = path.join(__dirname, 'temp.pdf');
-    await pdf.mv(tempFilePath);
-
-    // Extrae el texto crudo usando pdf-parse
-    const dataBuffer = fs.readFileSync(tempFilePath);
-    const data = await pdfParse(dataBuffer);
-    const rawText = data.text; // Texto crudo extraído
-
-    // Extrae los párrafos usando la función de extractParagraphs.js
-    const extractedParagraphs = await extractParagraphsFromPDF(tempFilePath, paragraphNumbersArray);
-
-    // Elimina el archivo temporal
-    fs.unlinkSync(tempFilePath);
-
-    // Devuelve los párrafos extraídos y el texto crudo
-    res.json({ extractedParagraphs, rawText });
+    // Usa el texto editado para extraer los párrafos
+    const editedText = pdfData[pdfId].editedText;
+    const extractedParagraphs = extractParagraphsFromText(editedText, paragraphNumbersArray);
+    
+    // Analizar cada párrafo con IA y obtener tanto el análisis completo como las palabras clave
+    const paragraphsWithAnalysis = [];
+    
+    for (const paragraph of extractedParagraphs) {
+      const analysis = await extractKeywords(paragraph.text);
+      paragraphsWithAnalysis.push({
+        ...paragraph,
+        aiAnalysis: analysis.fullResponse,
+        keywords: analysis.keywords
+      });
+    }
+    
+    res.json({ extractedParagraphs: paragraphsWithAnalysis });
   } catch (error) {
-    console.error('Error reading PDF:', error);
-    res.status(500).send('Error processing PDF.');
+    console.error('Error extracting paragraphs:', error);
+    res.status(500).send('Error extracting paragraphs');
   }
 });
 
