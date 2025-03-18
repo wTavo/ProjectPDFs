@@ -7,19 +7,27 @@ async function extractParagraphsFromPDF(filePath, paragraphNumbers) {
   try {
     const data = await pdfParse(dataBuffer);
     const text = data.text;
-    const paragraphs = text.split('\n').filter(p => p.trim() !== '');
+    const paragraphs = text.split('\n'); // No filtramos líneas vacías todavía
 
     const extractedParagraphs = paragraphNumbers.map(num => {
       // Expresión regular estricta para identificar números de párrafo
       const regex = new RegExp(`^${num}\\.\\s`);
-      const startIndex = paragraphs.findIndex(p => regex.test(p));
+      const startIndex = paragraphs.findIndex(p => regex.test(p.trim()));
       if (startIndex === -1) return null;
 
-      let paragraph = paragraphs[startIndex];
+      let paragraph = paragraphs[startIndex].trim();
       for (let i = startIndex + 1; i < paragraphs.length; i++) {
-        // Detener si encontramos un nuevo número de párrafo
-        if (/^\d+\.\s/.test(paragraphs[i]) || paragraphs[i].includes('__________________')) break;
-        paragraph += ' ' + paragraphs[i].trim(); // Unir líneas con un espacio
+        const currentLine = paragraphs[i].trim();
+
+        // Detener si encontramos un nuevo número de párrafo, una línea vacía o "__________________"
+        if (/^\d+\.\s/.test(currentLine) || currentLine === '' || currentLine.includes('__________________')) {
+          break;
+        }
+
+        // Agregar la línea al párrafo si no está vacía
+        if (currentLine !== '') {
+          paragraph += ' ' + currentLine;
+        }
       }
 
       // Formatear números de citas como superíndices (solo los que tienen un punto después)

@@ -6,6 +6,7 @@ function App() {
   const [file, setFile] = useState(null);
   const [paragraphNumbers, setParagraphNumbers] = useState('');
   const [extractedParagraphs, setExtractedParagraphs] = useState([]);
+  const [rawText, setRawText] = useState('');
 
   const handleFileChange = (e) => {
     setFile(e.target.files[0]);
@@ -34,6 +35,7 @@ function App() {
         },
       });
       setExtractedParagraphs(response.data.extractedParagraphs);
+      setRawText(response.data.rawText); // Mostrar el texto crudo
     } catch (error) {
       console.error('Error extracting paragraphs:', error);
       alert('Error al extraer los párrafos.');
@@ -59,6 +61,12 @@ function App() {
         {extractedParagraphs.map((paragraph, index) => (
           <div key={index} style={{ whiteSpace: 'pre-wrap', marginBottom: '20px' }} dangerouslySetInnerHTML={{ __html: paragraph }} />
         ))}
+      </div>
+      <div>
+        <h2>Texto Crudo Extraído por pdf-parse:</h2>
+        <pre style={{ whiteSpace: 'pre-wrap', background: '#f4f4f4', padding: '10px', border: '1px solid #ddd' }}>
+          {rawText}
+        </pre>
       </div>
     </div>
   );
